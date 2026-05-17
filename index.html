@@ -6,10 +6,48 @@
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
   <style>
     #cesiumContainer { width: 100%; height: 100vh; margin: 0; padding: 0; }
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    #ui-overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      pointer-events: none;
+      z-index: 1000;
+    }
+    .key-box {
+      display: inline-block;
+      border: 1px solid white;
+      padding: 2px 6px;
+      margin: 2px;
+      border-radius: 4px;
+      background: #333;
+    }
+    .active { background: #00ff00; color: black; font-weight: bold; }
   </style>
 </head>
 <body>
+  <div id="ui-overlay">
+    <h3>Spaceship Controls</h3>
+    <p>Translation: 
+      <span id="key-w" class="key-box">W</span>
+      <span id="key-s" class="key-box">S</span>
+      <span id="key-a" class="key-box">A</span>
+      <span id="key-d" class="key-box">D</span>
+    </p>
+    <p>Altitude/Rotation: 
+      <span id="key-ArrowUp" class="key-box">▲ ArrowUp</span>
+      <span id="key-ArrowDown" class="key-box">▼ ArrowDown</span>
+      <span id="key-ArrowLeft" class="key-box">◀ ArrowLeft</span>
+      <span id="key-ArrowRight" class="key-box">▶ ArrowRight</span>
+    </p>
+    <hr>
+    <p>Altitude: <span id="telemetry-alt">0</span> m</p>
+    <p>Vertical Velocity: <span id="telemetry-vy">0</span> m/s</p>
+  </div>
   <div id="cesiumContainer"></div>
   <script src="main.js"></script>
 </body>
