@@ -13,7 +13,8 @@ async function initCesium() {
     const GRAVITY_ACCEL = 9.81;    
     const THRUST_POWER = 18.0;     // Slightly boosted thrust to make climbing easier
     const ROTATION_SPEED = 1.5;    
-    const DRAG_COEFFICIENT = 0.85; 
+    const DRAG_COEFFICIENT = 0.85;
+    const LIFT_COEFFICIENT = 6.0;  // Higher = more lift from forward speed 
 
     // --- State Variables ---
     let velocityWorld = new Cesium.Cartesian3(0, 0, 0); 
@@ -23,8 +24,12 @@ async function initCesium() {
 
     let currentPosition = Cesium.Cartesian3.fromDegrees(18.466, 54.377, 500);
 
+    // --- Crash State ---
+    let hasCrashed = false;
+    let explosionEntity = null;
+
     // --- CRITICAL Fixed Input Handling ---
-    const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+    const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, ' ': false, Control: false };
     
     window.addEventListener('keydown', (e) => { 
         if (e.key in keys) {
@@ -74,8 +79,16 @@ async function initCesium() {
         if (dt <= 0 || dt > 0.1) return; 
 
         // 1. Handle Rotations
-        if (keys.ArrowLeft) heading -= ROTATION_SPEED * dt;
-        if (keys.ArrowRight) heading += ROTATION_SPEED * dt;
+        if (keys.ArrowUp) pitch += ROTATION_SPEED * dt;      // Tilt nose up
+        if (keys.ArrowDown) pitch -= ROTATION_SPEED * dt;    // Tilt nose down
+        if (keys.ArrowLeft) roll -= ROTATION_SPEED * dt;     // Roll left (bank left)
+        if (keys.ArrowRight) roll += ROTATION_SPEED * dt;    // Roll right (bank right)
+        if (keys.a) heading -= ROTATION_SPEED * dt;          // Turn left
+        if (keys.d) heading += ROTATION_SPEED * dt;          // Turn right
+        
+        // Clamp pitch and roll to prevent extreme tilting
+        pitch = Math.max(-Math.PI / 5, Math.min(Math.PI / 5, pitch));      // Limit nose up/down to 60°
+        roll = Math.max(-Math.PI / 3.5, Math.min(Math.PI / 3.5, roll));    // Limit left/right tilt to ~72°
 
         // 2. Local Orientation Matrix 
         const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
@@ -84,12 +97,13 @@ async function initCesium() {
         // 3. Assemble Local Thruster Forces
         const localThrustInput = new Cesium.Cartesian3(0, 0, 0);
 
-        if (keys.w) localThrustInput.x += THRUST_POWER;    
-        if (keys.s) localThrustInput.x -= THRUST_POWER;    
-        if (keys.a) localThrustInput.y += THRUST_POWER;    
-        if (keys.d) localThrustInput.y -= THRUST_POWER;    
-        if (keys.ArrowUp) localThrustInput.z += THRUST_POWER;   // Fights gravity directly
-        if (keys.ArrowDown) localThrustInput.z -= THRUST_POWER; 
+        // Default forward thrust so plane always moves
+        localThrustInput.x = THRUST_POWER * 0.6;
+
+        if (keys.w) localThrustInput.x += THRUST_POWER;    // Forward
+        if (keys.s) localThrustInput.x -= THRUST_POWER;    // Backward
+        if (keys[' ']) localThrustInput.z += THRUST_POWER;   // Up (Space - fights gravity)
+        if (keys.Control) localThrustInput.z -= THRUST_POWER;  // Down (Ctrl) 
 
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
@@ -98,8 +112,12 @@ async function initCesium() {
         const earthCenterDirection = new Cesium.Cartesian3();
         Cesium.Cartesian3.normalize(currentPosition, earthCenterDirection); 
         
+        // 4b. Calculate Aerodynamic Lift (based on forward speed and pitch)
+        const forwardSpeed = Math.abs(velocityWorld.x);  // Speed component
+        const liftForce = LIFT_COEFFICIENT * forwardSpeed * Math.sin(pitch);
+        
         const gravityVector = new Cesium.Cartesian3();
-        Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -GRAVITY_ACCEL, gravityVector);
+        Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -(GRAVITY_ACCEL - liftForce), gravityVector);
 
         // 5. Physics Integration
         const totalAcceleration = new Cesium.Cartesian3();
@@ -123,6 +141,27 @@ async function initCesium() {
         const terrainHeight = viewer.scene.globe.getHeight(cartographic) || 0;
 
         if (cartographic.height <= terrainHeight) {
+            if (!hasCrashed) {
+                // Plane crashed - spawn explosion and hide plane
+                hasCrashed = true;
+                shipEntity.model.color = Cesium.Color.TRANSPARENT; // Hide plane
+                
+                // Spawn explosion at crash location
+                const explosionPosition = Cesium.Cartographic.toCartesian(
+                    new Cesium.Cartographic(cartographic.longitude, cartographic.latitude, terrainHeight + 10)
+                );
+                
+                explosionEntity = viewer.entities.add({
+                    name: 'Explosion',
+                    position: explosionPosition,
+                    model: {
+                        uri: "model/scene.gltf",
+                        minimumPixelSize: 128,
+                        maximumScale: 20000
+                    }
+                });
+            }
+            
             cartographic.height = terrainHeight;
             currentPosition = Cesium.Cartographic.toCartesian(cartographic);
             velocityWorld = Cesium.Cartesian3.ZERO; 
@@ -133,8 +172,19 @@ async function initCesium() {
         // 7. Push Data to UI HTML elements
         // Projecting the world velocity vector onto the vertical Earth axis to get true climb speed
         const verticalVelocityComponent = Cesium.Cartesian3.dot(velocityWorld, earthCenterDirection);
+        
+        // Calculate horizontal velocity by removing vertical component (like car speedometer)
+        const verticalVelocityVector = new Cesium.Cartesian3();
+        Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, verticalVelocityComponent, verticalVelocityVector);
+        
+        const horizontalVelocityVector = new Cesium.Cartesian3();
+        Cesium.Cartesian3.subtract(velocityWorld, verticalVelocityVector, horizontalVelocityVector);
+        
+        const normalVelocityComponent = Cesium.Cartesian3.magnitude(horizontalVelocityVector);
+        
         document.getElementById('telemetry-alt').innerText = Math.round(cartographic.height);
         document.getElementById('telemetry-vy').innerText = verticalVelocityComponent.toFixed(2);
+        document.getElementById('telemetry-vn').innerText = normalVelocityComponent.toFixed(2);
     });
 }
 
