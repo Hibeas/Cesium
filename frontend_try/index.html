@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- =============================================
+       LAUNCH SCREEN — model selector added by AI
+       shown before the sim starts
+       ============================================= -->
+  <div id="launch-screen">
+    <div id="launch-panel">
+      <div id="launch-header">
+        <div id="launch-logo">✈</div>
+        <h1>CESIUM<span>FLIGHT</span></h1>
+        <p class="launch-sub">Select your aircraft and begin</p>
+      </div>
+
+      <div id="model-grid">
+        <div class="model-card selected" data-model="cesium_air" data-uri="model/Cesium_Air.glb">
+          <div class="model-card-icon">🛩</div>
+          <div class="model-card-name">Cesium Air</div>
+          <div class="model-card-desc">Classic prop plane — nimble, responsive</div>
+          <div class="model-card-check">✓</div>
+        </div>
+        <div class="model-card" data-model="airliner" data-uri="model/help.glb">
+          <div class="model-card-icon">✈</div>
+          <div class="model-card-name">Airliner</div>
+          <div class="model-card-desc">Heavy jet — powerful, momentum-driven</div>
+          <div class="model-card-check">✓</div>
+        </div>
+      </div>
+
+
+      <button id="launch-btn">
+        <span>LAUNCH SIMULATION</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+
+      <div id="launch-controls-hint">
+        <span><kbd>W</kbd><kbd>S</kbd> Throttle</span>
+        <span><kbd>▲</kbd><kbd>▼</kbd> Pitch</span>
+        <span><kbd>◀</kbd><kbd>▶</kbd> Roll / Bank</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- =============================================
+       HUD overlay — shown during flight
+       ============================================= -->
+  <div id="ui-overlay" style="display:none;">
+    <div id="hud-title">FLIGHT HUD</div>
+    <div class="hud-row">
+      <span class="hud-label">ALT</span>
+      <span id="telemetry-alt" class="hud-value">0</span>
+      <span class="hud-unit">m</span>
+    </div>
+    <div class="hud-row">
+      <span class="hud-label">VERT</span>
+      <span id="telemetry-vy" class="hud-value">0</span>
+      <span class="hud-unit">m/s</span>
+    </div>
+    <div class="hud-row">
+      <span class="hud-label">SPEED</span>
+      <span id="telemetry-vn" class="hud-value">0</span>
+      <span class="hud-unit">m/s</span>
+    </div>
+    <hr class="hud-divider">
+    <div class="key-row">
+      <span id="key-w" class="key-box">W</span>
+      <span id="key-s" class="key-box">S</span>
+      <span id="key-ArrowUp" class="key-box">▲</span>
+      <span id="key-ArrowDown" class="key-box">▼</span>
+      <span id="key-ArrowLeft" class="key-box">◀</span>
+      <span id="key-ArrowRight" class="key-box">▶</span>
+    </div>
+    <button id="restart-btn">↩ RESTART</button>
+  </div>
+
+  <div id="cesiumContainer"></div>
+  <script src="./main.js"></script>
+</body>
+</html>
