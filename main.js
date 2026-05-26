@@ -9,11 +9,9 @@ async function initCesium() {
         animation: false
     });
 
-    // --- Add 3D Buildings ---
-try {
+    // --- Load 3D Buildings with Dynamic Styling ---
+    try {
         const buildingTileset = await Cesium.createOsmBuildingsAsync();
-        
-        // Apply dynamic metadata coloring
         buildingTileset.style = new Cesium.Cesium3DTileStyle({
             defines: {
                 material: "${feature['building:material']}",
@@ -26,7 +24,7 @@ try {
                     ["${material} === 'concrete'", "color('darkgrey')"],
                     ["${type} === 'residential'", "color('navajowhite')"],
                     ["${type} === 'commercial'", "color('lightsteelblue')"],
-                    ["true", "color('gainsboro')"] // Default color for unclassified buildings
+                    ["true", "color('gainsboro')"]
                 ]
             }
         });
@@ -39,20 +37,16 @@ try {
     // ==========================================
     // --- Physics & Gameplay Settings ---
     // ==========================================
+
+
+
     const GRAVITY_ACCEL = 9.81;    
-    const THRUST_POWER = 9.0;     
+    const THRUST_POWER = 90.0;     
     const ROTATION_SPEED = 0.5;    
     const DRAG_COEFFICIENT = 0.85;
-    const LIFT_COEFFICIENT = 6.0;  
-
-    // 💡 ADJUST HERE: Turning Sharpness
-    // Higher values make the plane turn much faster when tilted sideways.
-    // Try 2.0 for an agile jet, or 0.5 for a heavy commercial airliner.
+    const LIFT_COEFFICIENT = 12.0;  
+    const PLANE_MASS = 20000; //kg
     const BANK_TURN_SENSITIVITY = 0.1; 
-
-    // 💡 ADJUST HERE: Thrust Drop-Off Severity
-    // Higher values make the thrust drop off MUCH faster during a climb.
-    // 1 = Mild/Linear loss, 2 = Heavy loss (realistic), 4 = Aggressive stall risk.
     const PITCH_DROP_OFF_EXPONENT = 2;
 
     // --- State Variables ---
@@ -60,6 +54,7 @@ try {
     let heading = Cesium.Math.toRadians(0);
     let pitch = 0.0;
     let roll = 0.0;
+    const PLANE_MASS_Calc = PLANE_MASS/4000; 
 
     let currentPosition = Cesium.Cartesian3.fromDegrees(18.466, 54.377, 500);
 
@@ -74,7 +69,7 @@ try {
         if (e.key in keys) {
             keys[e.key] = true;
             if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-                e.preventDefault(); // Stop browser from scrolling up/down
+                e.preventDefault();
             }
             const element = document.getElementById(`key-${e.key}`);
             if (element) element.classList.add('active');
@@ -99,6 +94,7 @@ try {
         }, false),
         model: {
             uri: "model/Cesium_Air.glb", 
+            //uri: "model/help.glb", 
             minimumPixelSize: 128,
             maximumScale: 20000
         }
@@ -115,38 +111,28 @@ try {
 
         if (dt <= 0 || dt > 0.1) return; 
 
-        // 1. Handle Rotations via Arrow Keys
-        if (keys.ArrowUp) pitch += ROTATION_SPEED * dt;      // Pitch Up (Nose points high)
-        if (keys.ArrowDown) pitch -= ROTATION_SPEED * dt;    // Pitch Down (Nose points low)
-        if (keys.ArrowLeft) roll -= ROTATION_SPEED * dt;     // Roll Left (Bank left)
-        if (keys.ArrowRight) roll += ROTATION_SPEED * dt;    // Roll Right (Bank right)
+        // Handle Rotations
+        if (keys.ArrowUp) pitch += ROTATION_SPEED * dt;
+        if (keys.ArrowDown) pitch -= ROTATION_SPEED * dt; 
+        if (keys.ArrowLeft) roll -= ROTATION_SPEED * dt;
+        if (keys.ArrowRight) roll += ROTATION_SPEED * dt;  
         
-        // 💡 ADJUST HERE: Clamping Limits
-        // Adjust these if you want the plane to be able to loop completely upside down.
-        // Currently limited to 36 degrees up/down and ~51 degrees left/right banking.
+        // Rotation Limits
         pitch = Math.max(-Math.PI / 5, Math.min(Math.PI / 5, pitch));      
         roll = Math.max(-Math.PI / 3.5, Math.min(Math.PI / 3.5, roll));    
 
-        // --- Dynamic Turning Logic ---
-        // Steeper bank angle (roll) translates directly into a faster heading turn.
         heading += Math.sin(roll) * BANK_TURN_SENSITIVITY * dt;
 
-        // 2. Local Orientation Matrix 
         const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
         const localFrameMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(currentPosition, hpr);
 
-        // 3. Assemble Local Thruster Forces
         const localThrustInput = new Cesium.Cartesian3(0, 0, 0);
 
-        // --- Pitch-Thrust Dynamic Scaling ---
         let thrustMultiplier = 1.0;
         if (pitch > 0) {
-            // As pitch increases toward its limit, Math.cos gets closer to 0.
-            // Using Math.pow makes the drop-off exponential based on your settings above.
             thrustMultiplier = Math.pow(Math.cos(pitch), PITCH_DROP_OFF_EXPONENT); 
         }
 
-        // Apply the calculation to forward movement (Default cruise + manual throttle)
         localThrustInput.x = (THRUST_POWER * 0.6) * thrustMultiplier;
 
         if (keys.w) localThrustInput.x += (THRUST_POWER * thrustMultiplier);    // Forward affected by pitch penalty
@@ -169,12 +155,16 @@ try {
         Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -(GRAVITY_ACCEL - liftForce), gravityVector);
 
         // 5. Physics Integration
-        const totalAcceleration = new Cesium.Cartesian3();
-        Cesium.Cartesian3.add(worldThrust, gravityVector, totalAcceleration);
+const thrustAcceleration = new Cesium.Cartesian3();
+Cesium.Cartesian3.divideByScalar(worldThrust, PLANE_MASS_Calc, thrustAcceleration);
 
-        const velocityChange = new Cesium.Cartesian3();
-        Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
-        Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
+const totalAcceleration = new Cesium.Cartesian3();
+// Add our mass-adjusted thrust acceleration to our gravity vector
+Cesium.Cartesian3.add(thrustAcceleration, gravityVector, totalAcceleration);
+
+const velocityChange = new Cesium.Cartesian3();
+Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
+Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
 
         // Atmospheric drag dampening
         Cesium.Cartesian3.multiplyByScalar(velocityWorld, Math.pow(DRAG_COEFFICIENT, dt), velocityWorld);
