@@ -37,17 +37,14 @@ async function initCesium() {
     // ==========================================
     // --- Physics & Gameplay Settings ---
     // ==========================================
-
-
-
-    const GRAVITY_ACCEL = 9.81;    
-    const THRUST_POWER = 90.0;     
-    const ROTATION_SPEED = 0.5;    
-    const DRAG_COEFFICIENT = 0.85;
-    const LIFT_COEFFICIENT = 12.0;  
-    const PLANE_MASS = 20000; //kg
-    const BANK_TURN_SENSITIVITY = 0.1; 
-    const PITCH_DROP_OFF_EXPONENT = 2;
+    const GRAVITY_ACCEL = 9.81;         // Earth's downward pull (m/s²). Higher = falls faster; Lower = floats like Mars.
+    const THRUST_POWER = 50.0;          // Base engine power forward. Higher = rocket-fast jet; Lower = weak, slow acceleration.
+    const ROTATION_SPEED = 0.5;         // Key responsiveness for pitch/roll. Higher = twitchy arcade; Lower = heavy cargo plane.
+    const DRAG_COEFFICIENT = 0.95;       // Air resistance brake. Higher = vacuum glide; Lower = thick mud.
+    const LIFT_COEFFICIENT = 9.0;       // Wing efficiency. Higher = floats upward easily on speed; Lower = slips down like a brick.
+    const PLANE_MASS = 20000;           // Weight in kg. Higher = sluggish movement, stalls easily; Lower = paper-light acceleration.
+    const BANK_TURN_SENSITIVITY = 0.1;  // Turning sharpness when tilted. Higher = sharp jet cuts; Lower = straight line sliding.
+    const PITCH_DROP_OFF_EXPONENT = 3;  // Engine penalty during steep climbs. Higher = fast stalls; 0 = infinite vertical rocket.
 
     // --- State Variables ---
     let velocityWorld = new Cesium.Cartesian3(0, 0, 0); 
@@ -55,10 +52,7 @@ async function initCesium() {
     let pitch = 0.0;
     let roll = 0.0;
     const PLANE_MASS_Calc = PLANE_MASS/4000; 
-
     let currentPosition = Cesium.Cartesian3.fromDegrees(18.466, 54.377, 500);
-
-    // --- Crash State ---
     let hasCrashed = false;
     let explosionEntity = null;
 
@@ -137,8 +131,6 @@ async function initCesium() {
 
         if (keys.w) localThrustInput.x += (THRUST_POWER * thrustMultiplier);    // Forward affected by pitch penalty
         if (keys.s) localThrustInput.x -= THRUST_POWER;                         // Reverse/Braking
-        if (keys[' ']) localThrustInput.z += THRUST_POWER;                      // Vertical VTOL Spacebar
-        if (keys.Control) localThrustInput.z -= THRUST_POWER;                   // Vertical VTOL Ctrl
 
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
@@ -155,16 +147,16 @@ async function initCesium() {
         Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -(GRAVITY_ACCEL - liftForce), gravityVector);
 
         // 5. Physics Integration
-const thrustAcceleration = new Cesium.Cartesian3();
-Cesium.Cartesian3.divideByScalar(worldThrust, PLANE_MASS_Calc, thrustAcceleration);
+        const thrustAcceleration = new Cesium.Cartesian3();
+        Cesium.Cartesian3.divideByScalar(worldThrust, PLANE_MASS_Calc, thrustAcceleration);
 
-const totalAcceleration = new Cesium.Cartesian3();
-// Add our mass-adjusted thrust acceleration to our gravity vector
-Cesium.Cartesian3.add(thrustAcceleration, gravityVector, totalAcceleration);
+        const totalAcceleration = new Cesium.Cartesian3();
+        // Add our mass-adjusted thrust acceleration to our gravity vector
+        Cesium.Cartesian3.add(thrustAcceleration, gravityVector, totalAcceleration);
 
-const velocityChange = new Cesium.Cartesian3();
-Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
-Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
+        const velocityChange = new Cesium.Cartesian3();
+        Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
+        Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
 
         // Atmospheric drag dampening
         Cesium.Cartesian3.multiplyByScalar(velocityWorld, Math.pow(DRAG_COEFFICIENT, dt), velocityWorld);
