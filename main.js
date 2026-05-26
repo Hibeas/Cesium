@@ -40,7 +40,7 @@ async function initCesium() {
     const GRAVITY_ACCEL = 9.81;         // Earth's downward pull (m/s²). Higher = falls faster; Lower = floats like Mars.
     const THRUST_POWER = 50.0;          // Base engine power forward. Higher = rocket-fast jet; Lower = weak, slow acceleration.
     const ROTATION_SPEED = 0.5;         // Key responsiveness for pitch/roll. Higher = twitchy arcade; Lower = heavy cargo plane.
-    const DRAG_COEFFICIENT = 0.95;       // Air resistance brake. Higher = vacuum glide; Lower = thick mud.
+    const DRAG_COEFFICIENT = 0.78;       // Air resistance brake. Higher = vacuum glide; Lower = thick mud.
     const LIFT_COEFFICIENT = 9.0;       // Wing efficiency. Higher = floats upward easily on speed; Lower = slips down like a brick.
     const PLANE_MASS = 20000;           // Weight in kg. Higher = sluggish movement, stalls easily; Lower = paper-light acceleration.
     const BANK_TURN_SENSITIVITY = 0.1;  // Turning sharpness when tilted. Higher = sharp jet cuts; Lower = straight line sliding.
@@ -78,7 +78,7 @@ async function initCesium() {
         }
     });
 
-    // --- Spawn Spaceship ---
+    // --- Spawn Plane ---
     const shipEntity = viewer.entities.add({
         name: 'PhysicsLander',
         position: new Cesium.CallbackProperty(() => currentPosition, false),
@@ -135,23 +135,22 @@ async function initCesium() {
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
 
-        // 4. Calculate Spherical Gravity
+        // Calculate Spherical Gravity
         const earthCenterDirection = new Cesium.Cartesian3();
         Cesium.Cartesian3.normalize(currentPosition, earthCenterDirection); 
         
-        // 4b. Calculate Aerodynamic Lift (based on forward speed and pitch)
+        // Calculate Aerodynamic Lift (based on forward speed and pitch)
         const forwardSpeed = Math.abs(velocityWorld.x);  
         const liftForce = LIFT_COEFFICIENT * forwardSpeed * Math.sin(pitch);
         
         const gravityVector = new Cesium.Cartesian3();
         Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -(GRAVITY_ACCEL - liftForce), gravityVector);
 
-        // 5. Physics Integration
+        // Physics Integration
         const thrustAcceleration = new Cesium.Cartesian3();
         Cesium.Cartesian3.divideByScalar(worldThrust, PLANE_MASS_Calc, thrustAcceleration);
 
         const totalAcceleration = new Cesium.Cartesian3();
-        // Add our mass-adjusted thrust acceleration to our gravity vector
         Cesium.Cartesian3.add(thrustAcceleration, gravityVector, totalAcceleration);
 
         const velocityChange = new Cesium.Cartesian3();
@@ -167,7 +166,7 @@ async function initCesium() {
         const nextPosition = new Cesium.Cartesian3();
         Cesium.Cartesian3.add(currentPosition, positionChange, nextPosition);
 
-        // 6. Terrain Collision & Telemetry Calculations
+        // Terrain Collision & Telemetry Calculations
         const cartographic = Cesium.Cartographic.fromCartesian(nextPosition);
         const terrainHeight = viewer.scene.globe.getHeight(cartographic) || 0;
 
@@ -198,7 +197,7 @@ async function initCesium() {
             currentPosition = nextPosition;
         }
 
-        // 7. Push Data to UI HTML elements
+        // Push Data to UI HTML elements
         const verticalVelocityComponent = Cesium.Cartesian3.dot(velocityWorld, earthCenterDirection);
         
         const verticalVelocityVector = new Cesium.Cartesian3();
