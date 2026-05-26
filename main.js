@@ -9,12 +9,51 @@ async function initCesium() {
         animation: false
     });
 
-    // --- Physics Settings ---
+    // --- Add 3D Buildings ---
+try {
+        const buildingTileset = await Cesium.createOsmBuildingsAsync();
+        
+        // Apply dynamic metadata coloring
+        buildingTileset.style = new Cesium.Cesium3DTileStyle({
+            defines: {
+                material: "${feature['building:material']}",
+                type: "${feature['building']}"
+            },
+            color: {
+                conditions: [
+                    ["${material} === 'glass'", "color('skyblue', 0.7)"],
+                    ["${material} === 'brick'", "color('indianred')"],
+                    ["${material} === 'concrete'", "color('darkgrey')"],
+                    ["${type} === 'residential'", "color('navajowhite')"],
+                    ["${type} === 'commercial'", "color('lightsteelblue')"],
+                    ["true", "color('gainsboro')"] // Default color for unclassified buildings
+                ]
+            }
+        });
+
+        viewer.scene.primitives.add(buildingTileset);
+    } catch (error) {
+        console.error(`Error loading 3D buildings tileset: ${error}`);
+    }
+
+    // ==========================================
+    // --- Physics & Gameplay Settings ---
+    // ==========================================
     const GRAVITY_ACCEL = 9.81;    
-    const THRUST_POWER = 18.0;     // Slightly boosted thrust to make climbing easier
-    const ROTATION_SPEED = 1.5;    
+    const THRUST_POWER = 9.0;     
+    const ROTATION_SPEED = 0.5;    
     const DRAG_COEFFICIENT = 0.85;
-    const LIFT_COEFFICIENT = 6.0;  // Higher = more lift from forward speed 
+    const LIFT_COEFFICIENT = 6.0;  
+
+    // 💡 ADJUST HERE: Turning Sharpness
+    // Higher values make the plane turn much faster when tilted sideways.
+    // Try 2.0 for an agile jet, or 0.5 for a heavy commercial airliner.
+    const BANK_TURN_SENSITIVITY = 0.1; 
+
+    // 💡 ADJUST HERE: Thrust Drop-Off Severity
+    // Higher values make the thrust drop off MUCH faster during a climb.
+    // 1 = Mild/Linear loss, 2 = Heavy loss (realistic), 4 = Aggressive stall risk.
+    const PITCH_DROP_OFF_EXPONENT = 2;
 
     // --- State Variables ---
     let velocityWorld = new Cesium.Cartesian3(0, 0, 0); 
@@ -28,17 +67,15 @@ async function initCesium() {
     let hasCrashed = false;
     let explosionEntity = null;
 
-    // --- CRITICAL Fixed Input Handling ---
-    const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, ' ': false, Control: false };
+    // --- Input Handling (a and d keys completely removed) ---
+    const keys = { w: false, s: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, ' ': false, Control: false };
     
     window.addEventListener('keydown', (e) => { 
         if (e.key in keys) {
             keys[e.key] = true;
-            // PREVENT BROWSER SCROLLING for ArrowUp and ArrowDown
             if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-                e.preventDefault();
+                e.preventDefault(); // Stop browser from scrolling up/down
             }
-            // Visual UI update
             const element = document.getElementById(`key-${e.key}`);
             if (element) element.classList.add('active');
         }
@@ -78,17 +115,21 @@ async function initCesium() {
 
         if (dt <= 0 || dt > 0.1) return; 
 
-        // 1. Handle Rotations
-        if (keys.ArrowUp) pitch += ROTATION_SPEED * dt;      // Tilt nose up
-        if (keys.ArrowDown) pitch -= ROTATION_SPEED * dt;    // Tilt nose down
-        if (keys.ArrowLeft) roll -= ROTATION_SPEED * dt;     // Roll left (bank left)
-        if (keys.ArrowRight) roll += ROTATION_SPEED * dt;    // Roll right (bank right)
-        if (keys.a) heading -= ROTATION_SPEED * dt;          // Turn left
-        if (keys.d) heading += ROTATION_SPEED * dt;          // Turn right
+        // 1. Handle Rotations via Arrow Keys
+        if (keys.ArrowUp) pitch += ROTATION_SPEED * dt;      // Pitch Up (Nose points high)
+        if (keys.ArrowDown) pitch -= ROTATION_SPEED * dt;    // Pitch Down (Nose points low)
+        if (keys.ArrowLeft) roll -= ROTATION_SPEED * dt;     // Roll Left (Bank left)
+        if (keys.ArrowRight) roll += ROTATION_SPEED * dt;    // Roll Right (Bank right)
         
-        // Clamp pitch and roll to prevent extreme tilting
-        pitch = Math.max(-Math.PI / 5, Math.min(Math.PI / 5, pitch));      // Limit nose up/down to 60°
-        roll = Math.max(-Math.PI / 3.5, Math.min(Math.PI / 3.5, roll));    // Limit left/right tilt to ~72°
+        // 💡 ADJUST HERE: Clamping Limits
+        // Adjust these if you want the plane to be able to loop completely upside down.
+        // Currently limited to 36 degrees up/down and ~51 degrees left/right banking.
+        pitch = Math.max(-Math.PI / 5, Math.min(Math.PI / 5, pitch));      
+        roll = Math.max(-Math.PI / 3.5, Math.min(Math.PI / 3.5, roll));    
+
+        // --- Dynamic Turning Logic ---
+        // Steeper bank angle (roll) translates directly into a faster heading turn.
+        heading += Math.sin(roll) * BANK_TURN_SENSITIVITY * dt;
 
         // 2. Local Orientation Matrix 
         const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
@@ -97,13 +138,21 @@ async function initCesium() {
         // 3. Assemble Local Thruster Forces
         const localThrustInput = new Cesium.Cartesian3(0, 0, 0);
 
-        // Default forward thrust so plane always moves
-        localThrustInput.x = THRUST_POWER * 0.6;
+        // --- Pitch-Thrust Dynamic Scaling ---
+        let thrustMultiplier = 1.0;
+        if (pitch > 0) {
+            // As pitch increases toward its limit, Math.cos gets closer to 0.
+            // Using Math.pow makes the drop-off exponential based on your settings above.
+            thrustMultiplier = Math.pow(Math.cos(pitch), PITCH_DROP_OFF_EXPONENT); 
+        }
 
-        if (keys.w) localThrustInput.x += THRUST_POWER;    // Forward
-        if (keys.s) localThrustInput.x -= THRUST_POWER;    // Backward
-        if (keys[' ']) localThrustInput.z += THRUST_POWER;   // Up (Space - fights gravity)
-        if (keys.Control) localThrustInput.z -= THRUST_POWER;  // Down (Ctrl) 
+        // Apply the calculation to forward movement (Default cruise + manual throttle)
+        localThrustInput.x = (THRUST_POWER * 0.6) * thrustMultiplier;
+
+        if (keys.w) localThrustInput.x += (THRUST_POWER * thrustMultiplier);    // Forward affected by pitch penalty
+        if (keys.s) localThrustInput.x -= THRUST_POWER;                         // Reverse/Braking
+        if (keys[' ']) localThrustInput.z += THRUST_POWER;                      // Vertical VTOL Spacebar
+        if (keys.Control) localThrustInput.z -= THRUST_POWER;                   // Vertical VTOL Ctrl
 
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
@@ -113,7 +162,7 @@ async function initCesium() {
         Cesium.Cartesian3.normalize(currentPosition, earthCenterDirection); 
         
         // 4b. Calculate Aerodynamic Lift (based on forward speed and pitch)
-        const forwardSpeed = Math.abs(velocityWorld.x);  // Speed component
+        const forwardSpeed = Math.abs(velocityWorld.x);  
         const liftForce = LIFT_COEFFICIENT * forwardSpeed * Math.sin(pitch);
         
         const gravityVector = new Cesium.Cartesian3();
@@ -142,13 +191,11 @@ async function initCesium() {
 
         if (cartographic.height <= terrainHeight) {
             if (!hasCrashed) {
-                // Plane crashed - spawn explosion and hide plane
                 hasCrashed = true;
-                shipEntity.model.color = Cesium.Color.TRANSPARENT; // Hide plane
+                shipEntity.model.color = Cesium.Color.TRANSPARENT; 
                 
-                // Spawn explosion at crash location
                 const explosionPosition = Cesium.Cartographic.toCartesian(
-                    new Cesium.Cartographic(cartographic.longitude, cartographic.latitude, terrainHeight + 10)
+                    new Cesium.Cartographic(cartographic.longitude, cartographic.latitude, terrainHeight)
                 );
                 
                 explosionEntity = viewer.entities.add({
@@ -170,10 +217,8 @@ async function initCesium() {
         }
 
         // 7. Push Data to UI HTML elements
-        // Projecting the world velocity vector onto the vertical Earth axis to get true climb speed
         const verticalVelocityComponent = Cesium.Cartesian3.dot(velocityWorld, earthCenterDirection);
         
-        // Calculate horizontal velocity by removing vertical component (like car speedometer)
         const verticalVelocityVector = new Cesium.Cartesian3();
         Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, verticalVelocityComponent, verticalVelocityVector);
         
@@ -188,4 +233,4 @@ async function initCesium() {
     });
 }
 
-initCesium(); 
+initCesium();
