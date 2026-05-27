@@ -38,7 +38,7 @@ async function initCesium() {
     // --- Physics & Gameplay Settings ---
     // ==========================================
     const GRAVITY_ACCEL = 9.81;         // Earth's downward pull (m/s²). Higher = falls faster; Lower = floats like Mars.
-    const THRUST_POWER = 50.0;          // Base engine power forward. Higher = rocket-fast jet; Lower = weak, slow acceleration.
+    const THRUST_POWER = 80.0;          // Base engine power forward. Higher = rocket-fast jet; Lower = weak, slow acceleration.
     const ROTATION_SPEED = 0.5;         // Key responsiveness for pitch/roll. Higher = twitchy arcade; Lower = heavy cargo plane.
     const DRAG_COEFFICIENT = 0.78;       // Air resistance brake. Higher = vacuum glide; Lower = thick mud.
     const LIFT_COEFFICIENT = 9.0;       // Wing efficiency. Higher = floats upward easily on speed; Lower = slips down like a brick.
@@ -135,13 +135,24 @@ async function initCesium() {
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
 
-        // Calculate Spherical Gravity
+// Calculate Spherical Gravity
         const earthCenterDirection = new Cesium.Cartesian3();
         Cesium.Cartesian3.normalize(currentPosition, earthCenterDirection); 
         
-        // Calculate Aerodynamic Lift (based on forward speed and pitch)
-        const forwardSpeed = Math.abs(velocityWorld.x);  
-        const liftForce = LIFT_COEFFICIENT * forwardSpeed * Math.sin(pitch);
+        // Use true 3D speed magnitude
+        const currentSpeed = Cesium.Cartesian3.magnitude(velocityWorld);  
+        
+        // FIX 1: Balance the Lift Curve
+        // Since currentSpeed is now correct, a lift multiplier of 9.0 is massive.
+        // We scale back the upward lift coefficient so you glide upward smoothly.
+        let effectiveLiftPitch = Math.sin(pitch);
+        if (pitch > 0) {
+            effectiveLiftPitch = effectiveLiftPitch * 0.12; // Tames the aggressive rocket-upward effect
+        } else {
+            effectiveLiftPitch = Math.max(-0.05, effectiveLiftPitch * 0.3); // Tweaks dive stability
+        }
+        
+        const liftForce = LIFT_COEFFICIENT * currentSpeed * effectiveLiftPitch;
         
         const gravityVector = new Cesium.Cartesian3();
         Cesium.Cartesian3.multiplyByScalar(earthCenterDirection, -(GRAVITY_ACCEL - liftForce), gravityVector);
@@ -157,8 +168,23 @@ async function initCesium() {
         Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
         Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
 
+// FIX 2: Dynamic Induced Drag (Climbing & Diving)
+        // In your math system, a LOWER activeDrag value = HEAVIER braking.
+        let activeDrag = DRAG_COEFFICIENT; // Base is 0.78
+        
+        if (pitch > 0) {
+            // Climbing: Drag increases (activeDrag drops) to naturally bleed off speed.
+            activeDrag = Math.max(0.55, DRAG_COEFFICIENT - (pitch * 0.35));
+        } else if (pitch < 0) {
+            // Diving: Drag decreases (activeDrag rises towards 1.0).
+            // Since pitch is negative, subtracting it INCREASES the activeDrag.
+            // This removes the "parachute" effect and lets gravity accelerate the plane.
+            // Clamped at 0.98 so you don't accelerate infinitely in a vacuum.
+            activeDrag = Math.min(0.98, DRAG_COEFFICIENT - (pitch * 0.5)); 
+        }
+
         // Atmospheric drag dampening
-        Cesium.Cartesian3.multiplyByScalar(velocityWorld, Math.pow(DRAG_COEFFICIENT, dt), velocityWorld);
+        Cesium.Cartesian3.multiplyByScalar(velocityWorld, Math.pow(activeDrag, dt), velocityWorld);
 
         // Calculate Next Position
         const positionChange = new Cesium.Cartesian3();
