@@ -135,19 +135,16 @@ async function initCesium() {
         // Local thrust direction -> World vector coordinates
         const worldThrust = Cesium.Matrix4.multiplyByPointAsVector(localFrameMatrix, localThrustInput, new Cesium.Cartesian3());
 
-// Calculate Spherical Gravity
+        // Calculate Spherical Gravity
         const earthCenterDirection = new Cesium.Cartesian3();
         Cesium.Cartesian3.normalize(currentPosition, earthCenterDirection); 
         
         // Use true 3D speed magnitude
         const currentSpeed = Cesium.Cartesian3.magnitude(velocityWorld);  
         
-        // FIX 1: Balance the Lift Curve
-        // Since currentSpeed is now correct, a lift multiplier of 9.0 is massive.
-        // We scale back the upward lift coefficient so you glide upward smoothly.
         let effectiveLiftPitch = Math.sin(pitch);
         if (pitch > 0) {
-            effectiveLiftPitch = effectiveLiftPitch * 0.12; // Tames the aggressive rocket-upward effect
+            effectiveLiftPitch = effectiveLiftPitch * 0.12; //no going down fast
         } else {
             effectiveLiftPitch = Math.max(-0.05, effectiveLiftPitch * 0.3); // Tweaks dive stability
         }
@@ -168,18 +165,13 @@ async function initCesium() {
         Cesium.Cartesian3.multiplyByScalar(totalAcceleration, dt, velocityChange);
         Cesium.Cartesian3.add(velocityWorld, velocityChange, velocityWorld);
 
-// FIX 2: Dynamic Induced Drag (Climbing & Diving)
-        // In your math system, a LOWER activeDrag value = HEAVIER braking.
-        let activeDrag = DRAG_COEFFICIENT; // Base is 0.78
+        let activeDrag = DRAG_COEFFICIENT;
         
         if (pitch > 0) {
-            // Climbing: Drag increases (activeDrag drops) to naturally bleed off speed.
+            // Climbing: Drag increases
             activeDrag = Math.max(0.55, DRAG_COEFFICIENT - (pitch * 0.35));
         } else if (pitch < 0) {
             // Diving: Drag decreases (activeDrag rises towards 1.0).
-            // Since pitch is negative, subtracting it INCREASES the activeDrag.
-            // This removes the "parachute" effect and lets gravity accelerate the plane.
-            // Clamped at 0.98 so you don't accelerate infinitely in a vacuum.
             activeDrag = Math.min(0.98, DRAG_COEFFICIENT - (pitch * 0.5)); 
         }
 
